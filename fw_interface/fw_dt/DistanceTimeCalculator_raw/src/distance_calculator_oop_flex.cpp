@@ -39,18 +39,22 @@ class Distance_TimeCalculator
     Distance_TimeCalculator(ros::NodeHandle *n)
     {
       resume_pub = n->advertise<geometry_msgs::PoseStamped>("move_base_simple/goal", 100);
+      resume_pub2 = n->advertise<std_msgs::Empty>("freeway/resume", 10);
       cancel_pub = n->advertise<actionlib_msgs::GoalID>("move_base_flex/move_base/cancel", 10);
+      cancel_pub2 = n->advertise<std_msgs::Empty>("freeway/goal_cancel", 10);
       cmd_pub = n->advertise<geometry_msgs::Twist>("cmd_vel", 10);
       pose_pub = n->advertise<geometry_msgs::PoseWithCovarianceStamped>("freeway/initialpose",10);
       cancel_sub = n->subscribe("freeway/goal_cancel", 100, &Distance_TimeCalculator::cancel_cb, this);
       feedback_sub = n->subscribe("move_base_flex/move_base/feedback", 1000, &Distance_TimeCalculator::get_feedback_cb, this);
       status_sub = n->subscribe("move_base_flex/move_base/status", 10, &Distance_TimeCalculator::get_status_cb, this);
       velocity_sub = n->subscribe("cmd_vel", 10, &Distance_TimeCalculator::get_velocity_cb, this);
-      getpath_sub = n->subscribe("move_base_flex/TebLocalPlannerROS/global_plan", 10, &Distance_TimeCalculator::get_globalpath_cb, this);
+      getpath_sub = n->subscribe("move_base_flex/DWBLocalPlanner/global_plan", 10, &Distance_TimeCalculator::get_globalpath_cb, this);
       resume_sub = n->subscribe("freeway/resume",10, &Distance_TimeCalculator::resume_cb, this);
       goal_sub = n->subscribe("move_base_simple/goal", 10, &Distance_TimeCalculator::goal_cb, this);
       pose_sub = n->subscribe("freeway/localization_pose", 10, &Distance_TimeCalculator::pose_cb, this);
       moving_check_sub = n->subscribe("freeway/moving_check", 10 , &Distance_TimeCalculator::moving_check_cb ,this);
+      finitialpose_sub = n->subscribe("freeway/finitialpose", 10, &Distance_TimeCalculator::finitialpose_cb, this);
+      front_blocked_path_sub = n->subscribe("/front_blocked_path", 10, &Distance_TimeCalculator::front_blocked_path_cb, this);
       clearcostmap_pub = n->serviceClient<std_srvs::Empty>("move_base_flex/clear_costmaps");
 
       total_vel = 0.0;
@@ -61,7 +65,10 @@ class Distance_TimeCalculator
       prev_current_robot_pose;
       final_goal;
       final_pose;
+      finitial_pose;
+      finitial_pose_flag = false;
       final_pose_time;
+      final_front_blocked_path_msg_time;
       move_base_GlobalPlanner_plan_Time=0.0;
       first_global_path_distance=0.0;
       global_path_percentage=0.0;
@@ -72,6 +79,7 @@ class Distance_TimeCalculator
       remaining_percentage=0.0;
       global_path_flag = false;
       moving_check_flag = false;
+      front_blocked_path_flag = false;
     }
 
 void cancel_cb(const std_msgs::Empty &cancel_msg) {
@@ -202,7 +210,7 @@ void check_update_time(ros::Time current_time)
 
 void check_pose_time(ros::Time current_time, std::string file_path)
 {
-  if ((current_time.toSec() - final_pose_time.toSec()) > POSE_RESET_TIME && final_pose.header.seq !=0) {
+  if ((current_time.toSec() - final_pose_time.toSec()) > POSE_RESET_TIME && final_pose.header.seq !=0) { 
     std_srvs::Empty srv;
     if(clearcostmap_pub.call(srv)) ROS_INFO("clear costmap call sucessfully...");
     tf::Quaternion q(
@@ -237,15 +245,42 @@ void check_pose_time(ros::Time current_time, std::string file_path)
    }
 }
 void pose_cb(const geometry_msgs::PoseWithCovarianceStamped &pose_msgs) {
-  if (!moving_check_flag) {
+  if (!moving_check_flag || finitial_pose_flag) {
     final_pose_time = ros::Time::now();
     final_pose = pose_msgs;
+    finitial_pose_flag = false;
   }
 }
+
+void check_block_time(ros::Time current_time) {
+ if ((current_time.toSec() - final_front_blocked_path_msg_time.toSec()) <= 0.5 && front_blocked_path_flag == true) {
+   std_msgs::Empty stop_msg;
+   cancel_pub2.publish(stop_msg);
+   front_blocked_path_flag = false; 
+  }
+ else if ((current_time.toSec() - final_front_blocked_path_msg_time.toSec()) > 0.5 && front_blocked_path_flag == false) {
+    std_msgs::Empty resume_msg;
+    resume_pub2.publish(resume_msg);
+    front_blocked_path_flag = true;
+  }
+}
+
+void front_blocked_path_cb(const std_msgs::Bool &front_blocked_path_msg) {
+ final_front_blocked_path_msg_time = ros::Time::now();
+ //front_blocked_path_data = true;
+}
+
 void moving_check_cb(const std_msgs::Bool &moving_check_msg) {
     if (moving_check_msg.data) moving_check_flag = true; //it's not moving
     else if (!moving_check_msg.data) moving_check_flag = false; //it's moving
 }
+
+void finitialpose_cb(const geometry_msgs::PoseWithCovarianceStamped &fpose_msgs) {
+  finitial_pose = fpose_msgs;
+  finitial_pose_flag = true;
+  pose_pub.publish(finitial_pose);
+}
+
 double r_msg_global_path_distance()
 {
   return msg_global_path_distance;
@@ -273,8 +308,10 @@ double r_status_info_()
 
   private:
     ros::Publisher resume_pub;
+    ros::Publisher resume_pub2;
     ros::Publisher cmd_pub;
     ros::Publisher cancel_pub;
+    ros::Publisher cancel_pub2;
     ros::Publisher pose_pub;
     ros::Subscriber cancel_sub;
     ros::Subscriber feedback_sub;
@@ -285,6 +322,8 @@ double r_status_info_()
     ros::Subscriber goal_sub;
     ros::Subscriber pose_sub;
     ros::Subscriber moving_check_sub;
+    ros::Subscriber finitialpose_sub;
+    ros::Subscriber front_blocked_path_sub;
     ros::ServiceClient clearcostmap_pub;
 
     float total_vel;
@@ -295,8 +334,10 @@ double r_status_info_()
     geometry_msgs::Pose prev_current_robot_pose;
     geometry_msgs::PoseStamped final_goal;
     geometry_msgs::PoseWithCovarianceStamped final_pose;
+    geometry_msgs::PoseWithCovarianceStamped finitial_pose;
     double move_base_GlobalPlanner_plan_Time;
     ros::Time final_pose_time;
+    ros::Time final_front_blocked_path_msg_time;
     float first_global_path_distance;
     float global_path_percentage;
     float remaining_time;
@@ -306,6 +347,8 @@ double r_status_info_()
     double remaining_percentage;
     bool global_path_flag;
     bool moving_check_flag;
+    bool finitial_pose_flag;
+    bool front_blocked_path_flag;
 };
 
 int main(int argc, char **argv)
@@ -320,7 +363,7 @@ int main(int argc, char **argv)
   std::string root_path=ros::package::getPath("fw_rev_04_navigation");
   std::string config_path=root_path.append("/config/initial_pose_params.yaml");
 
-  ros::Rate loop_rate(10);
+  ros::Rate loop_rate(20);
 
   while (ros::ok())
   {
@@ -335,6 +378,7 @@ int main(int argc, char **argv)
     // if ((ros::Time::now().toSec() - Dt.move_base_GlobalPlanner_plan_Time) < 2.0) { Dt.status_flag=1; }
     // else { Dt.status_flag=0; Dt.remaining_time = 0.0; Dt.msg_global_path_distance=0.0; Dt.first_global_path_distance=0.0; Dt.traveled_distance=0.0; Dt.first_time=0; Dt.remaining_percentage=0.0; Dt.global_path_flag=false;}
     Dt.check_update_time(cur_time);
+    Dt.check_block_time(cur_time);
     if(fix_pose) Dt.check_pose_time(cur_time, config_path);
 
     distancetimecalculator_msg.distance_remaining = Dt.r_msg_global_path_distance();

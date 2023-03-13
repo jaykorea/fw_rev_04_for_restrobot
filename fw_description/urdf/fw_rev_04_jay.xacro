@@ -22,7 +22,7 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://fw_rev_04_description/meshes/bases/newHotelRobot.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://fw_rev_04_description/meshes/bases/freeway_restaurant_robot.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="grey"/>
     </visual>
@@ -55,7 +55,7 @@
   <joint name="scan_joint" type="fixed">
     <parent link="base_link"/>
     <child link="base_scan"/>
-    <origin xyz="0.2423 0 0.0091" rpy="0 0 ${PI}"/>
+    <origin xyz="0.3005 0 0.0186" rpy="0 0 ${PI}"/>
   </joint>
 
   <link name="base_scan">
@@ -270,7 +270,7 @@
   </link> -->
 
   <xacro:sensor_d455 parent="base_link" name="d455" use_nominal_extrinsics="$(arg use_nominal_extrinsics)">
-    <origin xyz="0.2245 0 0.2225" rpy="0 0 0"/>
+    <origin xyz="0.293 0 0.1645" rpy="0 0 0"/>
   </xacro:sensor_d455>
 
 
